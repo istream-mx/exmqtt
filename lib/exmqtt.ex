@@ -179,7 +179,15 @@ defmodule ExMQTT do
       opts: [{:msg_handler, handler_functions} | opts]
     }
 
+    Process.flag(:trap_exit, true)
     {:ok, state, {:continue, {:start_when, start_when}}}
+  end
+
+  @impl true
+  def terminate(reason, state) do
+    IO.inspect("terminateeee handler")
+    IO.inspect(reason)
+    :normal
   end
 
   ## Continue
@@ -361,6 +369,9 @@ defmodule ExMQTT do
       {:error, reason} when is_atom(reason) ->
         {:error, reason}
 
+      {:error, {reason, _}} ->
+        {:error, reason}
+
       {:ok, res} ->
         {:error, res}
     end
@@ -427,7 +438,7 @@ defmodule ExMQTT do
 
   defp retry_delay(initial_delay, max_delay, attempt) when attempt < 1000 do
     temp = min(max_delay, pow(initial_delay * 2, attempt))
-    temp / 2 + Enum.random([0, temp / 2])
+    (temp / 2 + Enum.random([0, temp / 2])) |> Kernel.trunc()
   end
 
   defp retry_delay(_initial_delay, max_delay, _attempt) do
