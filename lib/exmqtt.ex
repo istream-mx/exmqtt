@@ -387,6 +387,8 @@ defmodule ExMQTT do
 
       {:ok, res} ->
         {:error, res}
+      _ ->
+        {:error, "Error de conexion"}
     end
   end
 
