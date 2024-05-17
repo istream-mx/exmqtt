@@ -308,6 +308,12 @@ defmodule ExMQTT do
     end
   end
 
+  def handle_info({:EXIT, _, :closed}, %{reconnect: {initial_delay, max_delay}} = state) do
+    delay = retry_delay(initial_delay, max_delay, 0)
+    Process.send_after(self(), {:reconnect, 1}, delay)
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.warning("[ExMQTT] Unhandled message #{inspect(msg)}")
     {:noreply, state}
@@ -326,9 +332,16 @@ defmodule ExMQTT do
     :ok
   end
 
+  def handle_disconnect(reason_code, arg) do
+    Logger.warning("[ExMQTT] Disconnect received: reason #{reason_code}")
+
+    :ok
+  end
+
   ## Message
 
   @impl ExMQTT.MessageHandler
+
   def handle_message(_topic, _message, _arg) do
     Logger.warning("[ExMQTT] Message received but no handler module defined")
     :ok
