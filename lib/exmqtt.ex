@@ -20,7 +20,8 @@ defmodule ExMQTT do
       :opts,
       :protocol_version,
       :reconnect,
-      :subscriptions
+      :subscriptions,
+      :connection_type
     ]
   end
 
@@ -98,7 +99,8 @@ defmodule ExMQTT do
     :properties,
     :reconnect,
     :subscriptions,
-    :start_when
+    :start_when,
+    :connection_type
   ]
 
   @doc """
@@ -153,6 +155,7 @@ defmodule ExMQTT do
 
   @impl GenServer
   def init(opts) do
+
     opts = take_opts(opts)
     {{dc_handler, dc_arg}, opts} = Keyword.pop(opts, :disconnect_handler, {__MODULE__, []})
     {{msg_handler, msg_arg}, opts} = Keyword.pop(opts, :message_handler, {__MODULE__, []})
@@ -161,6 +164,7 @@ defmodule ExMQTT do
     {{delay, max_delay}, opts} = Keyword.pop(opts, :reconnect, {2000, 60_000})
     {start_when, opts} = Keyword.pop(opts, :start_when, :now)
     {subscriptions, opts} = Keyword.pop(opts, :subscriptions, [])
+    {connection_type,_} = Keyword.pop(opts, :connection_type, :tcp)
 
     # EMQTT `msg_handler` functions
     handler_functions = %{
@@ -176,7 +180,8 @@ defmodule ExMQTT do
       reconnect: {delay, max_delay},
       subscriptions: subscriptions,
       username: opts[:username],
-      opts: [{:msg_handler, handler_functions} | opts]
+      opts: [{:msg_handler, handler_functions} | opts],
+      connection_type: connection_type
     }
 
     Process.flag(:trap_exit, true)
@@ -187,6 +192,7 @@ defmodule ExMQTT do
   def terminate(reason, state) do
     IO.inspect("terminateeee handler")
     IO.inspect(reason)
+
     :normal
   end
 
@@ -374,7 +380,7 @@ defmodule ExMQTT do
 
     with(
       {:ok, conn_pid} when is_pid(conn_pid) <- :emqtt.start_link(opts),
-      {:ok, _props} <- :emqtt.ws_connect(conn_pid)
+      {:ok, _props} <- do_connect(conn_pid, state) |> IO.inspect
     ) do
       Logger.debug("[ExMQTT] Connected #{inspect(conn_pid)}")
       {:ok, %State{state | conn_pid: conn_pid}}
@@ -510,5 +516,16 @@ defmodule ExMQTT do
 
   defp map_opt(opt, opts) do
     [opt | opts]
+  end
+
+  defp do_connect(conn_pid, state) do
+    if state.connection_type == :tcp do
+      Logger.debug("[ExMQTT] Connecting via tcp")
+      :emqtt.connect(conn_pid)
+    else
+      Logger.debug("[ExMQTT] Connecting via ws")
+      :emqtt.ws_connect(conn_pid)
+    end
+
   end
 end
