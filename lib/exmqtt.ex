@@ -129,6 +129,10 @@ defmodule ExMQTT do
     GenServer.cast(__MODULE__, :disconnect)
   end
 
+  def conn_status?() do
+    GenServer.call(__MODULE__, :conn_status)
+  end
+
   ## Sync
 
   def publish_sync(message, topic, qos) do
@@ -155,7 +159,6 @@ defmodule ExMQTT do
 
   @impl GenServer
   def init(opts) do
-
     opts = take_opts(opts)
     {{dc_handler, dc_arg}, opts} = Keyword.pop(opts, :disconnect_handler, {__MODULE__, []})
     {{msg_handler, msg_arg}, opts} = Keyword.pop(opts, :message_handler, {__MODULE__, []})
@@ -164,7 +167,7 @@ defmodule ExMQTT do
     {{delay, max_delay}, opts} = Keyword.pop(opts, :reconnect, {2000, 60_000})
     {start_when, opts} = Keyword.pop(opts, :start_when, :now)
     {subscriptions, opts} = Keyword.pop(opts, :subscriptions, [])
-    {connection_type,_} = Keyword.pop(opts, :connection_type, :tcp)
+    {connection_type, _} = Keyword.pop(opts, :connection_type, :tcp)
 
     # EMQTT `msg_handler` functions
     handler_functions = %{
@@ -190,8 +193,7 @@ defmodule ExMQTT do
 
   @impl true
   def terminate(reason, state) do
-    IO.inspect("terminateeee handler")
-    IO.inspect(reason)
+    Logger.debug("[ExMQTT] terminate worker #{inspect(reason)}")
 
     :normal
   end
@@ -222,11 +224,23 @@ defmodule ExMQTT do
         {:noreply, state}
 
       {:error, _reason} ->
+        send(self(), {:try_connect, attempt + 1})
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:try_connect, attempt}, state) do
+    case connect(state) do
+      {:ok, state} ->
+        :ok = sub(state, state.subscriptions)
+        {:noreply, state}
+
+      {:error, _reason} ->
         %{reconnect: {initial_delay, max_delay}} = state
         delay = retry_delay(initial_delay, max_delay, attempt)
-        Logger.debug("[ExMQTT] Unable to connect, retrying in #{delay} ms")
-        :timer.sleep(delay)
-        {:noreply, state, {:continue, {:connect, attempt + 1}}}
+        Logger.warning("[ExMQTT] Unable to connect, retrying in #{delay} ms")
+        Process.send_after(self(), {:try_connect, attempt + 1}, delay)
+        {:noreply, state}
     end
   end
 
@@ -252,6 +266,14 @@ defmodule ExMQTT do
   def handle_call(:disconnect, _from, state) do
     dc(state)
     {:reply, :ok, state}
+  end
+
+  def handle_call(:conn_status, _from, %{conn_pid: conn_pid} = state) when is_pid(conn_pid) do
+    {:reply, :emqtt.status(conn_pid), state}
+  end
+
+  def handle_call(:conn_status, _from, state) do
+    {:reply, :disconnected, state}
   end
 
   ## Cast
@@ -380,7 +402,7 @@ defmodule ExMQTT do
 
     with(
       {:ok, conn_pid} when is_pid(conn_pid) <- :emqtt.start_link(opts),
-      {:ok, _props} <- do_connect(conn_pid, state) |> IO.inspect
+      {:ok, _props} <- do_connect(conn_pid, state)
     ) do
       Logger.debug("[ExMQTT] Connected #{inspect(conn_pid)}")
       {:ok, %State{state | conn_pid: conn_pid}}
@@ -393,6 +415,7 @@ defmodule ExMQTT do
 
       {:ok, res} ->
         {:error, res}
+
       _ ->
         {:error, "Error de conexion"}
     end
@@ -526,6 +549,5 @@ defmodule ExMQTT do
       Logger.debug("[ExMQTT] Connecting via ws")
       :emqtt.ws_connect(conn_pid)
     end
-
   end
 end
